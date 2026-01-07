@@ -1,0 +1,102 @@
+using BepInEx;
+using BepInEx.Logging;
+using HarmonyLib;
+using System;
+using System.IO;
+using System.Text;
+using UnityEngine;
+
+[BepInPlugin("cc.redirect.fhuor2", "CC Redirect FHUOR2", "2.0.0")]
+public class CCRedirectPlugin : BaseUnityPlugin
+{
+    internal static ManualLogSource Log;
+
+    private static string CCRoot =>
+        Path.Combine(Paths.PluginPath, "CC");
+
+    private static int _logHitsLeft = 20;
+
+    private void Awake()
+    {
+        Log = Logger;
+
+        Directory.CreateDirectory(CCRoot);
+        Log.LogInfo("CC Redirect Plugin v2.0.0 loaded.");
+        Log.LogInfo("CC folder: " + CCRoot);
+
+        var h = new Harmony("cc.redirect.fhuor2.multi");
+        h.PatchAll();
+
+        Log.LogInfo("Harmony patches applied.");
+    }
+
+    private static bool TryGetExternal(TextAsset ta, out byte[] bytes, out string text)
+    {
+        bytes = null;
+        text = null;
+
+        if (ta == null || string.IsNullOrEmpty(ta.name))
+            return false;
+
+        // z.B. "1_01_0_0" -> ".../CC/1_01_0_0.json"
+        var path = Path.Combine(CCRoot, ta.name + ".json");
+
+        if (!File.Exists(path))
+            return false;
+
+        bytes = File.ReadAllBytes(path);
+        text = Encoding.UTF8.GetString(bytes)
+            .Replace("\\n", "\n");
+        return true;
+    }
+
+    // -------- TextAsset.text --------
+    [HarmonyPatch(typeof(TextAsset), nameof(TextAsset.text), MethodType.Getter)]
+    private static class Patch_Text
+    {
+        private static bool Prefix(TextAsset __instance, ref string __result)
+        {
+            try
+            {
+                if (!TryGetExternal(__instance, out _, out var txt))
+                    return true;
+
+                if (_logHitsLeft-- > 0)
+                    Log.LogInfo($"[CC REDIRECT:text] {__instance.name}");
+
+                __result = txt;
+                return false;
+            }
+            catch (Exception e)
+            {
+                Log.LogError(e);
+                return true;
+            }
+        }
+    }
+
+    // -------- TextAsset.bytes --------
+    [HarmonyPatch(typeof(TextAsset), nameof(TextAsset.bytes), MethodType.Getter)]
+    private static class Patch_Bytes
+    {
+        private static bool Prefix(TextAsset __instance, ref byte[] __result)
+        {
+            try
+            {
+                if (!TryGetExternal(__instance, out var bytes, out _))
+                    return true;
+
+                if (_logHitsLeft-- > 0)
+                    Log.LogInfo($"[CC REDIRECT:bytes] {__instance.name}");
+
+                __result = bytes;
+                return false;
+            }
+            catch (Exception e)
+            {
+                Log.LogError(e);
+                return true;
+            }
+        }
+    }
+}
